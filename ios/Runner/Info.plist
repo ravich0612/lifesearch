@@ -66,5 +66,9 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>LifeSearch needs access to your photo library to index and search your memories locally on this device.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>LifeSearch needs access to your camera to capture new memories for indexing.</string>
 </dict>
 </plist>
