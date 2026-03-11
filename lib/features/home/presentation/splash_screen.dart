@@ -35,27 +35,26 @@ class _SplashScreenState extends ConsumerState<SplashScreen> {
       return;
     }
 
+    final seenOnboarding = prefs.getBool('seen_onboarding') ?? false;
+    final backgroundIndexing = prefs.getBool('background_indexing_enabled') ?? false;
+    
     // 2. Check existing permission status
     final photoStatus = await Permission.photos.status;
     final storageStatus = await Permission.storage.status;
-    final hasAnyPermission = photoStatus.isGranted || storageStatus.isGranted;
-    final seenOnboarding = prefs.getBool('seen_onboarding') ?? false;
-    // Check if user previously chose limited mode
-    final choseLimitedMode = prefs.getBool('limited_mode') ?? false;
+    final hasAllPermissions = photoStatus.isGranted && storageStatus.isGranted;
     
     if (mounted) {
-      if (hasAnyPermission) {
-        // Has permission but indexing not done — resume
-        context.go('/indexing');
-      } else if (choseLimitedMode) {
-        // User previously said "Not Now" — drop them at home
+      if (backgroundIndexing) {
+        // User opted to proceed while indexing in background
         context.go('/home');
+      } else if (hasAllPermissions) {
+        // All required permissions granted but indexing not done — resume
+        context.go('/indexing');
       } else if (seenOnboarding) {
-        // Seen onboarding, but no permissions/limited mode yet — back to permissions
+        // Seen onboarding, but missing some permissions — back to permissions
         context.go('/permissions');
       } else {
         // Brand new user
-        await prefs.setBool('seen_onboarding', true);
         if (mounted) context.go('/onboarding');
       }
     }

@@ -4,9 +4,18 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'core/router/app_router.dart';
 import 'core/theme/app_theme.dart';
 
+import 'core/services/notification_service.dart';
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   
+  // Initialize Notification Service
+  try {
+    await NotificationService().init();
+  } catch (e) {
+    debugPrint('Notification initialization failed: $e');
+  }
+
   // Initialize Firebase (Assuming configuration is handled via CLI or manual download)
   // For now, we wrap in a try-catch to allow the app to run without config files
   try {

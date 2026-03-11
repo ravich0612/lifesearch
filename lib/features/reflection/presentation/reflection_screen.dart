@@ -5,6 +5,7 @@ import '../../home/providers/home_providers.dart' as hp;
 import '../../../core/theme/app_colors.dart';
 import 'dart:io';
 import 'dart:math' as math;
+import '../../../core/utils/file_utils.dart';
 
 class ReflectionScreen extends ConsumerWidget {
   const ReflectionScreen({super.key});
@@ -30,7 +31,7 @@ class ReflectionScreen extends ConsumerWidget {
               return _MemoryConstellation(memories: memories);
             },
             loading: () => const Center(child: CircularProgressIndicator(color: Colors.white24)),
-            error: (_, __) => const _EmptyState(),
+            error: (err, stack) => const _EmptyState(),
           ),
 
           // ── OVERLAY HUD ──
@@ -39,7 +40,7 @@ class ReflectionScreen extends ConsumerWidget {
             left: 24,
             right: 24,
             child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -61,11 +62,15 @@ class ReflectionScreen extends ConsumerWidget {
                     ).animate().scaleX(duration: 1.seconds),
                   ],
                 ),
-                IconButton(
-                  onPressed: () => Navigator.pop(context),
-                  icon: const Icon(Icons.close_rounded, color: Colors.white60),
-                ),
               ],
+            ),
+          ),
+          
+          // ── THE ORB (LIFE SYNTHESIS) ──
+          const Positioned.fill(
+            child: IgnorePointer(
+              ignoring: true, // Let taps pass through to constellation if needed
+              child: _LifeSynthesisOrb(),
             ),
           ),
           
@@ -146,7 +151,7 @@ class _NebulaBackground extends StatelessWidget {
         );
       },
       loading: () => Container(color: AppColors.backgroundDark),
-      error: (_, __) => Container(color: AppColors.backgroundDark),
+      error: (err, stack) => Container(color: AppColors.backgroundDark),
     );
   }
 }
@@ -159,8 +164,8 @@ class _MemoryConstellation extends StatelessWidget {
   Widget build(BuildContext context) {
     final filtered = memories.where((m) {
       final path = m['file_path'] as String? ?? '';
-      final isVideo = path.toLowerCase().endsWith('.mp4') || path.toLowerCase().endsWith('.mov');
-      return path.isNotEmpty && File(path).existsSync() && !isVideo;
+      final mime = m['mime_type'] as String?;
+      return path.isNotEmpty && File(path).existsSync() && FileUtils.canBeLoadedAsImage(path, mime);
     }).toList();
 
     return Stack(
@@ -203,7 +208,7 @@ class _EtherealMemory extends StatelessWidget {
         child: Image.file(
           File(path),
           fit: BoxFit.cover,
-          errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+          errorBuilder: (context, error, stackTrace) => const SizedBox.shrink(),
         ),
       ).animate(onPlay: (c) => c.repeat())
        .moveY(begin: 0, end: -150, duration: duration.seconds, curve: Curves.easeInOutSine)
@@ -230,5 +235,147 @@ class _EmptyState extends StatelessWidget {
         style: TextStyle(color: Colors.white24, fontSize: 14),
       ),
     );
+  }
+}
+
+class _LifeSynthesisOrb extends ConsumerWidget {
+  const _LifeSynthesisOrb();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final pulseAsync = ref.watch(hp.lifePulseProvider);
+
+    return pulseAsync.when(
+      data: (pulse) {
+        if (pulse.isEmpty) return const SizedBox.shrink();
+
+        final narrative = _generateNarrative(pulse);
+        final dominant = _getDominant(pulse);
+        final moodColor = AppColors.moodColors[dominant] ?? AppColors.deepIndigo;
+
+        return Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Stack(
+                alignment: Alignment.center,
+                children: [
+                  // The Halo
+                  Container(
+                    width: 140,
+                    height: 140,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      boxShadow: [
+                        BoxShadow(
+                          color: moodColor.withValues(alpha: 0.2),
+                          blurRadius: 40,
+                          spreadRadius: 10,
+                        ),
+                      ],
+                    ),
+                  ).animate(onPlay: (c) => c.repeat())
+                    .scale(duration: 3.seconds, begin: const Offset(0.8, 0.8), end: const Offset(1.2, 1.2), curve: Curves.easeInOutSine)
+                    .then()
+                    .scale(duration: 3.seconds, begin: const Offset(1.2, 1.2), end: const Offset(0.8, 0.8)),
+
+                  // The Orb
+                  Container(
+                    width: 90,
+                    height: 90,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      gradient: RadialGradient(
+                        colors: [
+                          Colors.white.withValues(alpha: 0.9),
+                          moodColor.withValues(alpha: 0.3),
+                          moodColor,
+                        ],
+                        center: const Alignment(-0.3, -0.4),
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.1),
+                          blurRadius: 20,
+                          offset: const Offset(0, 10),
+                        ),
+                      ],
+                    ),
+                    child: Center(
+                      child: Icon(
+                        _getNarrativeIcon(dominant),
+                        color: Colors.white,
+                        size: 32,
+                      ),
+                    ),
+                  ).animate(onPlay: (c) => c.repeat())
+                   .shimmer(duration: 4.seconds, color: Colors.white.withValues(alpha: 0.4))
+                   .blur(begin: const Offset(0,0), end: const Offset(2,2), duration: 2.seconds)
+                   .then()
+                   .blur(begin: const Offset(2,2), end: const Offset(0,0), duration: 2.seconds),
+                ],
+              ),
+              const SizedBox(height: 24),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 40),
+                child: Column(
+                  children: [
+                    Text(
+                      narrative.toUpperCase(),
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: 2.0,
+                        color: moodColor,
+                      ),
+                    ).animate().fadeIn(duration: 1.seconds),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Your Life Reflection',
+                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        fontSize: 22,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: -0.5,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+      loading: () => const SizedBox.shrink(),
+      error: (e, s) => const SizedBox.shrink(),
+    );
+  }
+
+  String _getDominant(Map<String, double> pulse) {
+    String dominant = 'GENERAL';
+    double max = 0.0;
+    pulse.forEach((k, v) { if (v > max) { max = v; dominant = k.toUpperCase(); } });
+    return dominant;
+  }
+
+  String _generateNarrative(Map<String, double> pulse) {
+    final dominant = _getDominant(pulse);
+    switch (dominant) {
+      case 'TRAVEL': return "A season of wide horizons";
+      case 'DOCUMENTS': return "Focused intent and growth";
+      case 'RECEIPTS': return "Investment in your journey";
+      case 'GALLERY': return "Capturing color and light";
+      default: return "A steady, flowing pulse";
+    }
+  }
+
+  IconData _getNarrativeIcon(String dominant) {
+    switch (dominant) {
+      case 'TRAVEL': return Icons.explore_rounded;
+      case 'DOCUMENTS': return Icons.auto_awesome_mosaic_rounded;
+      case 'RECEIPTS': return Icons.account_balance_wallet_rounded;
+      default: return Icons.bubble_chart_rounded;
+    }
   }
 }

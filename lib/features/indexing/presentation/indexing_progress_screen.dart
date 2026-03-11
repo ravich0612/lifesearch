@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:go_router/go_router.dart';
-import '../../../core/theme/app_colors.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:lottie/lottie.dart';
 import '../../../core/services/indexing_service.dart';
 
 class IndexingProgressScreen extends ConsumerStatefulWidget {
@@ -27,188 +28,360 @@ class _IndexingProgressScreenState extends ConsumerState<IndexingProgressScreen>
 
     return StreamBuilder<Map<String, dynamic>>(
       stream: statusStream,
-      initialData: const {'message': 'Initializing...', 'progress': 0.0},
+      initialData: const {'message': 'Initializing...', 'progress': 0.0, 'fact': 'Igniting neural pathways...'},
       builder: (context, snapshot) {
         final data = snapshot.data!;
         final double progress = data['progress'] ?? 0.0;
         final String message = data['message'] ?? 'Processing...';
+        final String fact = data['fact'] ?? 'Constructing your second brain...';
         
         if (progress >= 1.0) {
           WidgetsBinding.instance.addPostFrameCallback((_) {
              context.go('/home');
           });
-        } else if (message == 'Permissions required') {
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-             context.go('/permissions');
-          });
         }
 
-        _StageData stage = _getStage(progress);
-
         return Scaffold(
-          backgroundColor: AppColors.backgroundLight,
-          body: SafeArea(
-            child: LayoutBuilder(
-              builder: (context, constraints) {
-                final double screenHeight = constraints.maxHeight;
-                final double topPadding = screenHeight * 0.1; // Responsive top padding
-                final double ringSize = (screenHeight * 0.3).clamp(180.0, 240.0);
+          backgroundColor: Colors.black,
+          body: Stack(
+            children: [
+              // 1. Cinematic Nebula Background
+              const _NebulaBackground(),
+              
+              const _EnergyParticles(),
 
-                return Padding(
+              // 2. The Main Content
+              SafeArea(
+                child: Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 40),
                   child: Column(
                     children: [
-                      SizedBox(height: topPadding),
+                      const Spacer(flex: 2),
                       
-                      // Playful Progress Ring
-                      Stack(
-                        alignment: Alignment.center,
+                      // The Central Core (The "Brain" forming)
+                      _FormationCore(progress: progress),
+                      
+                      const Spacer(),
+                      
+                      // Status Text
+                      Column(
                         children: [
-                          Center(
-                            child: SizedBox(
-                              width: ringSize,
-                              height: ringSize,
-                              child: CircularProgressIndicator(
-                                value: progress,
-                                strokeWidth: 10,
-                                backgroundColor: AppColors.backgroundElevated,
-                                color: stage.color,
-                                strokeCap: StrokeCap.round,
+                          Text(
+                            'GENESIS',
+                            style: TextStyle(
+                              color: Colors.white.withValues(alpha: 0.5),
+                              fontSize: 12,
+                              fontWeight: FontWeight.w900,
+                              letterSpacing: 8,
+                            ),
+                          ).animate().fadeIn().slideY(begin: 0.2),
+                          const SizedBox(height: 16),
+                          Text(
+                            message.toUpperCase(),
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 24,
+                              fontWeight: FontWeight.w900,
+                              letterSpacing: -0.5,
+                            ),
+                          ).animate(key: ValueKey(message))
+                            .fadeIn(duration: 600.ms)
+                            .scale(begin: const Offset(0.95, 0.95)),
+                          const SizedBox(height: 12),
+                          AnimatedSwitcher(
+                            duration: 800.ms,
+                            child: Text(
+                              fact,
+                              key: ValueKey(fact),
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                color: Colors.white.withValues(alpha: 0.6),
+                                fontSize: 13,
+                                fontStyle: FontStyle.italic,
                               ),
                             ),
                           ),
-                          
-                          AnimatedSwitcher(
-                            duration: 800.ms,
-                            child: Container(
-                              key: ValueKey(stage.icon),
-                              padding: EdgeInsets.all(ringSize * 0.15),
-                              decoration: BoxDecoration(
-                                color: stage.color.withValues(alpha: 0.1),
-                                shape: BoxShape.circle,
-                              ),
-                              child: Icon(
-                                stage.icon,
-                                size: ringSize * 0.35,
-                                color: stage.color,
-                              ),
-                            ),
-                          ).animate(onPlay: (c) => c.repeat(reverse: true))
-                            .move(begin: const Offset(0, -5), end: const Offset(0, 5), duration: 1.5.seconds, curve: Curves.easeInOut),
                         ],
-                      ),
-                      
-                      SizedBox(height: screenHeight * 0.05),
-                      
-                      // Text Content
-                      AnimatedSwitcher(
-                        duration: 500.ms,
-                        child: Column(
-                          key: ValueKey(message),
-                          children: [
-                            Text(
-                              message,
-                              textAlign: TextAlign.center,
-                              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                                fontWeight: FontWeight.bold,
-                                color: AppColors.textPrimary,
-                                fontSize: (screenHeight * 0.03).clamp(18.0, 24.0),
-                              ),
-                            ),
-                            const SizedBox(height: 8),
-                            Text(
-                              progress < 0.3 ? 'Prioritizing screenshots and docs' : 'Finishing in the background...',
-                              textAlign: TextAlign.center,
-                              style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                                color: AppColors.textSecondary,
-                                fontSize: (screenHeight * 0.02).clamp(12.0, 16.0),
-                              ),
-                            ),
-                          ],
-                        ),
                       ),
 
                       const Spacer(),
-                      
-                      // Progress Dots
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: List.generate(5, (index) {
-                          final bool isPast = progress >= (index / 4);
-                          return AnimatedContainer(
-                            duration: 400.ms,
-                            margin: const EdgeInsets.symmetric(horizontal: 4),
-                            width: isPast ? 12 : 8,
-                            height: 8,
-                            decoration: BoxDecoration(
-                              color: isPast ? stage.color : AppColors.divider,
-                              borderRadius: BorderRadius.circular(4),
-                            ),
-                          );
-                        }),
-                      ),
 
-                      const SizedBox(height: 24),
-                      
-                      // Status Tracking Info
-                      if (progress > 0.2 && progress < 1.0)
-                        TextButton(
-                          onPressed: () => context.go('/home'),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Flexible(
-                                child: Text(
-                                  'Search ready • Finishing up...',
-                                  overflow: TextOverflow.ellipsis,
-                                  textAlign: TextAlign.center,
-                                  style: TextStyle(
-                                    fontSize: (screenHeight * 0.016).clamp(12.0, 14.0),
-                                    fontWeight: FontWeight.w600,
+                      // Progress Bar (Premium Thin Style)
+                      Column(
+                        children: [
+                          Container(
+                            height: 4,
+                            width: double.infinity,
+                            decoration: BoxDecoration(
+                              color: Colors.white.withValues(alpha: 0.1),
+                              borderRadius: BorderRadius.circular(2),
+                            ),
+                            child: FractionallySizedBox(
+                              alignment: Alignment.centerLeft,
+                              widthFactor: progress.clamp(0.01, 1.0),
+                              child: Container(
+                                decoration: BoxDecoration(
+                                  gradient: const LinearGradient(
+                                    colors: [Color(0xFF7B66FF), Color(0xFF00D2FF)],
                                   ),
+                                  borderRadius: BorderRadius.circular(2),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: const Color(0xFF7B66FF).withValues(alpha: 0.5),
+                                      blurRadius: 10,
+                                    ),
+                                  ],
                                 ),
                               ),
-                              const SizedBox(width: 6),
-                              const Icon(Icons.arrow_forward_rounded, size: 14),
-                            ],
+                            ),
                           ),
-                        ).animate().fadeIn()
-                      else
-                        Text(
-                          '${(progress * 100).toInt()}% indexed',
-                          style: const TextStyle(
-                            color: AppColors.textTertiary,
-                            fontWeight: FontWeight.w600,
-                            letterSpacing: 1.2,
+                          const SizedBox(height: 16),
+                          Text(
+                            '${(progress * 100).toInt()}% READY',
+                            style: TextStyle(
+                              color: Colors.white.withValues(alpha: 0.4),
+                              fontSize: 10,
+                              fontWeight: FontWeight.bold,
+                              letterSpacing: 2,
+                            ),
                           ),
-                        ).animate().fadeIn(),
+                        ],
+                      ),
                       
-                      const SizedBox(height: 24),
+                      const Spacer(),
+
+                      // Background indexing CTA
+                      TextButton(
+                        onPressed: () async {
+                          final prefs = await SharedPreferences.getInstance();
+                          await prefs.setBool('background_indexing_enabled', true);
+                          if (mounted) context.go('/home');
+                        },
+                        child: Column(
+                          children: [
+                            Text(
+                              'NOTIFY ME WHEN DONE',
+                              style: TextStyle(
+                                color: Colors.white.withValues(alpha: 0.6),
+                                fontSize: 12,
+                                fontWeight: FontWeight.w800,
+                                letterSpacing: 2,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Container(
+                              height: 1,
+                              width: 40,
+                              color: Colors.white.withValues(alpha: 0.2),
+                            ),
+                          ],
+                        ),
+                      ).animate().fadeIn(delay: 2.seconds),
+                      
+                      const SizedBox(height: 40),
+                      
+                      Text(
+                        'This is a one-time synthesis.\nYour memories stay private and on-device.',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.3),
+                          fontSize: 10,
+                          height: 1.5,
+                        ),
+                      ),
+                      
+                      const SizedBox(height: 40),
                     ],
                   ),
-                );
-              },
-            ),
+                ),
+              ),
+            ],
           ),
         );
       },
     );
   }
+}
 
-  _StageData _getStage(double progress) {
-    if (progress < 0.3) {
-      return _StageData(icon: Icons.auto_awesome_rounded, color: Colors.indigoAccent);
-    } else if (progress < 0.6) {
-      return _StageData(icon: Icons.document_scanner_rounded, color: Colors.cyanAccent.shade700);
-    } else {
-      return _StageData(icon: Icons.memory_rounded, color: Colors.deepPurpleAccent);
-    }
+class _FormationCore extends StatefulWidget {
+  final double progress;
+  const _FormationCore({required this.progress});
+
+  @override
+  State<_FormationCore> createState() => _FormationCoreState();
+}
+
+class _FormationCoreState extends State<_FormationCore> with SingleTickerProviderStateMixin {
+  late final AnimationController _rotationController;
+
+  @override
+  void initState() {
+    super.initState();
+    _rotationController = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 12),
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _rotationController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      alignment: Alignment.center,
+      children: [
+        // Pulsing Core with Lottie
+        SizedBox(
+          width: 300,
+          height: 300,
+          child: Lottie.asset(
+            'assets/animations/Global.json',
+            fit: BoxFit.contain,
+          ),
+        ),
+          
+        // Rotating Orbitals using native Ticker for maximum smoothness under load
+        AnimatedBuilder(
+          animation: _rotationController,
+          builder: (context, child) {
+            return Transform.rotate(
+              angle: _rotationController.value * 2 * 3.14159,
+              child: CustomPaint(
+                size: const Size(260, 260),
+                painter: _OrbitalPainter(
+                  progress: widget.progress,
+                  rotation: _rotationController.value,
+                ),
+              ),
+            );
+          },
+        ),
+      ],
+    );
   }
 }
 
-class _StageData {
-  final IconData icon;
-  final Color color;
+class _OrbitalPainter extends CustomPainter {
+  final double progress;
+  final double rotation;
+  _OrbitalPainter({required this.progress, required this.rotation});
 
-  _StageData({required this.icon, required this.color});
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = Offset(size.width / 2, size.height / 2);
+    final radius = size.width / 2;
+
+    final orbitPaint = Paint()
+      ..color = const Color(0xFF00D2FF).withValues(alpha: 0.3)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1;
+      
+    canvas.drawCircle(center, radius, orbitPaint);
+    
+    // Draw "Memory Particle" on the orbit
+    // We draw it at the end of the orbit (at width, height/2) 
+    // because the entire canvas is already being rotated by the Transform.rotate widget
+    final dotPaint = Paint()
+      ..color = const Color(0xFF00D2FF)
+      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 3);
+
+    canvas.drawCircle(Offset(size.width, size.height / 2), 5, dotPaint);
+  }
+
+  @override
+  bool shouldRepaint(covariant _OrbitalPainter oldDelegate) => 
+      oldDelegate.rotation != rotation;
+}
+
+class _NebulaBackground extends StatelessWidget {
+  const _NebulaBackground();
+
+  @override
+  Widget build(BuildContext context) {
+    return Positioned.fill(
+      child: Stack(
+        children: [
+          Container(color: Colors.black),
+          Positioned(
+            top: -100,
+            right: -100,
+            child: Container(
+              width: 400,
+              height: 400,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: RadialGradient(
+                  colors: [
+                    const Color(0xFF7B66FF).withValues(alpha: 0.15),
+                    Colors.transparent,
+                  ],
+                ),
+              ),
+            ),
+          ).animate(onPlay: (c) => c.repeat(reverse: true))
+            .move(duration: 10.seconds, begin: const Offset(0, 0), end: const Offset(-50, 50)),
+            
+          Positioned(
+            bottom: -50,
+            left: -50,
+            child: Container(
+              width: 300,
+              height: 300,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: RadialGradient(
+                  colors: [
+                    const Color(0xFF00D2FF).withValues(alpha: 0.1),
+                    Colors.transparent,
+                  ],
+                ),
+              ),
+            ),
+          ).animate(onPlay: (c) => c.repeat(reverse: true))
+            .move(duration: 8.seconds, begin: const Offset(0, 0), end: const Offset(40, -40)),
+        ],
+      ),
+    );
+  }
+}
+
+class _EnergyParticles extends StatelessWidget {
+  const _EnergyParticles();
+
+  @override
+  Widget build(BuildContext context) {
+    return Positioned.fill(
+      child: IgnorePointer(
+        child: Stack(
+          children: List.generate(20, (i) {
+            final x = (i * 17) % 100 / 100.0;
+            final y = (i * 23) % 100 / 100.0;
+            final size = (i % 3 + 1).toDouble();
+
+            return Positioned(
+              left: MediaQuery.of(context).size.width * x,
+              top: MediaQuery.of(context).size.height * y,
+              child: Container(
+                width: size,
+                height: size,
+                decoration: const BoxDecoration(
+                  color: Colors.white,
+                  shape: BoxShape.circle,
+                ),
+              ).animate(onPlay: (c) => c.repeat())
+                .fadeIn(duration: 2.seconds)
+                .then()
+                .fadeOut(duration: 2.seconds)
+                .scale(begin: const Offset(0, 0), end: const Offset(1, 1), duration: 2.seconds),
+            );
+          }),
+        ),
+      ),
+    );
+  }
 }

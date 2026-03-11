@@ -8,9 +8,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:path/path.dart' as p;
 import 'database_service.dart';
+import 'semantic_service.dart';
 import 'memory_trigger_engine.dart';
 import 'life_timeline_engine.dart';
 
+import '../utils/file_utils.dart';
+import 'notification_service.dart';
 import '../../features/home/providers/home_providers.dart' show indexingProgressProvider;
 
 final indexingServiceProvider = Provider((ref) => IndexingService(ref));
@@ -24,6 +27,7 @@ class IndexingService {
   final ImageLabeler _imageLabeler = ImageLabeler(options: ImageLabelerOptions(confidenceThreshold: 0.6));
   final MemoryTriggerEngine _triggerEngine = MemoryTriggerEngine();
   final LifeTimelineEngine _timelineEngine = LifeTimelineEngine();
+  final SemanticService _semanticService = SemanticService();
 
   IndexingService(this._ref);
   
@@ -35,6 +39,9 @@ class IndexingService {
   Future<void> startIndexing() async {
     if (_isProcessing) return;
     _isProcessing = true;
+    
+    // Initialize the neural brain
+    await _semanticService.initialize();
 
     try {
       final PermissionState permission = await PhotoManager.requestPermissionExtend();
@@ -57,11 +64,26 @@ class IndexingService {
       unawaited(_runBackgroundProcessing());
     } catch (e) {
       debugPrint('Indexing error: $e');
-      _emitStatus('Indexing paused', 0.0);
+      _emitStatus('Indexing paused', 0.0, fact: 'Checking connection to your life ledger...');
     } finally {
       _isProcessing = false;
     }
   }
+
+  final List<String> _discoveryFacts = [
+    'Mapping neural connections...',
+    'Building your digital sanctuary...',
+    'Linking moments through time...',
+    'Organizing a decade of thoughts...',
+    'Securing your private memories...',
+    'Synthesizing life patterns...',
+    'Finding the beauty in your data...',
+    'Creating your second brain...',
+    'Indexing the colors of your past...',
+    'Almost ready for reflection...',
+  ];
+
+  String get _randomFact => (List.from(_discoveryFacts)..shuffle()).first;
 
   Future<void> _runFileSystemDiscovery() async {
     _emitStatus('Scanning your storage...', 0.45);
@@ -120,9 +142,13 @@ class IndexingService {
     final ext = p.extension(file.path).toLowerCase();
     // High-value document extensions
     const docExtensions = ['.pdf', '.doc', '.docx', '.txt', '.rtf', '.xls', '.xlsx', '.csv'];
+    const imgExtensions = ['.jpg', '.jpeg', '.png', '.webp', '.heic', '.heif'];
     
     if (docExtensions.contains(ext)) {
       await _discoverFile(file, BucketType.documents);
+    } else if (imgExtensions.contains(ext)) {
+      // Catch older images that might not be in the media gallery database
+      await _discoverFile(file, BucketType.photos);
     }
   }
 
@@ -272,7 +298,7 @@ class IndexingService {
           
           // CRITICAL: Mandatory breathing room after every heavy OCR/ML operation
           // This allows Flutter to process UI interactions, clicks, and animations.
-          await Future.delayed(const Duration(milliseconds: 50));
+          await Future.delayed(const Duration(milliseconds: 200));
         } catch (e) {
           debugPrint('Task Failed ($itemId): $e');
           await _db.updateQueueStatus(taskId, 'ERROR');
@@ -297,6 +323,13 @@ class IndexingService {
     
     await _setIndexingComplete();
     _emitStatus('Indexing complete', 1.0);
+
+    // Show completion notification
+    await NotificationService().showNotification(
+      id: 100,
+      title: 'Genesis Synthesis Complete 🧠✨',
+      body: 'Your neural pathways have been formed. Your life history is now instantly searchable.',
+    );
   }
 
   // --- Helpers ---
@@ -333,7 +366,8 @@ class IndexingService {
 
     // Layer 2: Queue appropriate tasks
     final mimeType = asset.mimeType ?? '';
-    if (!mimeType.startsWith('video/')) {
+    final path = (await asset.file)?.path ?? '';
+    if (!mimeType.startsWith('video/') && !FileUtils.isVideo(path)) {
       // 1. Text heavy assets get OCR priority
       if (bucket == BucketType.screenshots || bucket == BucketType.receipts || bucket == BucketType.documents) {
         await _db.addToQueue(asset.id, 'OCR', priority);
@@ -351,6 +385,8 @@ class IndexingService {
       await _performTargetedOCR(itemId);
     } else if (taskType == 'LABEL') {
       await _performImageLabeling(itemId);
+    } else if (taskType == 'EMBED') {
+      await _performEmbedding(itemId);
     }
     // Future: CLASSIFY, ENRICH etc
   }
@@ -364,12 +400,8 @@ class IndexingService {
     final mime = (results.first['mime_type'] as String?) ?? '';
     if (path.isEmpty || !File(path).existsSync()) return;
 
-    // ML Kit Text Recognition only supports images (JPEG, PNG, WEBP, etc.)
-    final isImage = mime.startsWith('image/') ||
-        path.toLowerCase().endsWith('.jpg') ||
-        path.toLowerCase().endsWith('.jpeg') ||
-        path.toLowerCase().endsWith('.png') ||
-        path.toLowerCase().endsWith('.webp');
+    // ML Kit Text Recognition only supports images
+    final isImage = FileUtils.canBeLoadedAsImage(path, mime);
 
     if (!isImage) {
       // Mark as "OCR attempted" so we don't waste time re-processing
@@ -397,6 +429,8 @@ class IndexingService {
       // Immediately run trigger detection on freshly OCR'd text
       if (text.isNotEmpty) {
         unawaited(_triggerEngine.processItem(itemId));
+        // Queue embedding task now that we have text content
+        await _db.addToQueue(itemId, 'EMBED', 3);
       }
     } catch (e) {
       debugPrint('[OCR] Failed for $itemId: $e');
@@ -411,7 +445,8 @@ class IndexingService {
     if (results.isEmpty) return;
 
     final path = results.first['file_path'] as String;
-    if (path.isEmpty || !File(path).existsSync()) return;
+    final mime = (results.first['mime_type'] as String?) ?? '';
+    if (path.isEmpty || !File(path).existsSync() || !FileUtils.canBeLoadedAsImage(path, mime)) return;
 
     try {
       final inputImage = InputImage.fromFilePath(path);
@@ -437,6 +472,9 @@ class IndexingService {
           (results.first['title'] as String?) ?? '',
           tags, // Store visual labels as searchable tags
         );
+
+        // Queue embedding task for visual concepts
+        await _db.addToQueue(itemId, 'EMBED', 2);
       }
     } catch (e) {
       debugPrint('[LABEL] Failed for $itemId: $e');
@@ -463,10 +501,11 @@ class IndexingService {
     return BucketType.photos;
   }
 
-  void _emitStatus(String message, double progress) {
+  void _emitStatus(String message, double progress, {String? fact}) {
     _statusController.add({
       'message': message,
       'progress': progress,
+      'fact': fact ?? _randomFact,
     });
     // Triggers the Home Screen progress card to refresh
     _ref.invalidate(indexingProgressProvider);
@@ -486,6 +525,32 @@ class IndexingService {
     await _db.clearAllData();
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('indexing_completed');
+  }
+
+  Future<void> _performEmbedding(String itemId) async {
+    final db = await _db.database;
+    final results = await db.query('memory_items', where: 'id = ?', whereArgs: [itemId]);
+    if (results.isEmpty) return;
+
+    final item = results.first;
+    final title = item['title'] as String? ?? 'Untitled';
+    
+    // Get content from FTS
+    final ftsResults = await db.query('memory_items_fts', where: 'memory_item_id = ?', whereArgs: [itemId]);
+    final ocrContent = ftsResults.isNotEmpty ? (ftsResults.first['content'] as String? ?? '') : '';
+    final tags = ftsResults.isNotEmpty ? (ftsResults.first['tags'] as String? ?? '') : '';
+
+    // Create a rich context string for the neural engine
+    final richContext = "$title. $tags. $ocrContent".trim();
+    if (richContext.isEmpty) return;
+
+    try {
+      final vector = await _semanticService.embed(richContext);
+      await _db.saveEmbedding(itemId, vector, 'bert-mini-v1');
+      debugPrint('[EMBED] Neural synthesis complete for $itemId');
+    } catch (e) {
+      debugPrint('[EMBED] Neural synthesis failed for $itemId: $e');
+    }
   }
 
   void dispose() {

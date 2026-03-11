@@ -94,7 +94,7 @@ class _PermissionsScreenState extends State<PermissionsScreen> {
   }
 
   Future<void> _onContinue() async {
-    if (_photosGranted || _storageGranted) {
+    if (_photosGranted && _storageGranted) {
       // Clear limited mode since user is providing full access now
       final prefs = await SharedPreferences.getInstance();
       await prefs.setBool('limited_mode', false);
@@ -102,10 +102,17 @@ class _PermissionsScreenState extends State<PermissionsScreen> {
       if (!mounted) return;
       context.go('/indexing');
     } else {
-      // Nothing granted yet — request photos first
-      await _requestPhotos();
-      // After attempt, check again
-      if (_photosGranted || _storageGranted) {
+      // Request missing permissions sequentially
+      if (!_photosGranted) {
+        await _requestPhotos();
+      } 
+      
+      if (_photosGranted && !_storageGranted) {
+        await _requestStorage();
+      }
+      
+      // After attempts, if both are now granted, proceed
+      if (_photosGranted && _storageGranted) {
         final prefs = await SharedPreferences.getInstance();
         await prefs.setBool('limited_mode', false);
         if (!mounted) return;
@@ -114,12 +121,6 @@ class _PermissionsScreenState extends State<PermissionsScreen> {
     }
   }
 
-  void _enterLimitedMode() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool('limited_mode', true);
-    if (!mounted) return;
-    context.go('/home');
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -179,7 +180,7 @@ class _PermissionsScreenState extends State<PermissionsScreen> {
                 PrimaryGradientButton(
                   onPressed: _onContinue,
                   child: Text(
-                    _photosGranted || _storageGranted ? 'Start Indexing' : 'Give Access',
+                    _photosGranted && _storageGranted ? 'Start Indexing' : 'Grant All Access',
                     style: const TextStyle(
                       fontSize: 16,
                       fontWeight: FontWeight.w600,
@@ -188,17 +189,6 @@ class _PermissionsScreenState extends State<PermissionsScreen> {
                   ),
                 ).animate().fadeIn(delay: 1.seconds),
                 const SizedBox(height: 16),
-                TextButton(
-                  onPressed: _enterLimitedMode,
-                  child: const Text(
-                    'Not now — use limited mode',
-                    style: TextStyle(
-                      color: AppColors.textTertiary,
-                      fontSize: 13,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ).animate().fadeIn(delay: 1200.ms),
                 const SizedBox(height: 32),
               ],
             ),

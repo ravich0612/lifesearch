@@ -1,5 +1,6 @@
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
+import 'dart:typed_data';
 
 class DatabaseService {
   static Database? _database;
@@ -21,20 +22,16 @@ class DatabaseService {
     );
   }
 
-  /// Called when the DB is opened (every launch) — ensures new tables exist
-  /// even if somehow missed by onCreate/onUpgrade.
   Future<void> _onOpen(Database db) async {
     await _ensureTablesExist(db);
   }
 
-  /// Migrate existing databases to newer schema versions.
   Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
     if (oldVersion < 2) {
       await _ensureTablesExist(db);
     }
   }
 
-  /// Idempotently create any tables that may be missing (safe to call multiple times).
   Future<void> _ensureTablesExist(Database db) async {
     await db.execute('''
       CREATE TABLE IF NOT EXISTS timeline_events (
@@ -72,16 +69,23 @@ class DatabaseService {
         is_accepted INTEGER DEFAULT 0
       )
     ''');
+
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS memory_embeddings (
+        memory_item_id TEXT PRIMARY KEY,
+        embedding_blob BLOB,
+        model_version TEXT
+      )
+    ''');
   }
 
   Future<void> _onCreate(Database db, int version) async {
-    // 1. Core metadata table
     await db.execute('''
       CREATE TABLE memory_items (
         id TEXT PRIMARY KEY,
-        source_type TEXT,        -- 'MEDIA', 'FILE', 'IMPORT'
-        source_bucket TEXT,      -- 'SCREENSHOTS', 'DOCUMENTS', 'GALLERY', 'DOWNLOADS'
-        source_id TEXT,          -- Original identifier from OS or provider
+        source_type TEXT,
+        source_bucket TEXT,
+        source_id TEXT,
         file_path TEXT,
         thumbnail_path TEXT,
         preview_path TEXT,
@@ -95,16 +99,24 @@ class DatabaseService {
         is_favorite INTEGER DEFAULT 0,
         is_indexed INTEGER DEFAULT 0,
         is_ocr_complete INTEGER DEFAULT 0,
+        is_embedded INTEGER DEFAULT 0,
         is_enriched INTEGER DEFAULT 0,
         confidence_score REAL DEFAULT 1.0,
         last_seen_hash TEXT,
-        tags_json TEXT,          -- JSON list of tags
-        entities_json TEXT,      -- JSON list of detected entities
+        tags_json TEXT,
+        entities_json TEXT,
         metadata_json TEXT
       )
     ''');
 
-    // 2. FTS4 Virtual table for fast searching
+    await db.execute('''
+      CREATE TABLE memory_embeddings (
+        memory_item_id TEXT PRIMARY KEY,
+        embedding_blob BLOB,
+        model_version TEXT
+      )
+    ''');
+
     await db.execute('''
       CREATE VIRTUAL TABLE memory_items_fts USING fts4(
         memory_item_id,
@@ -116,7 +128,6 @@ class DatabaseService {
       )
     ''');
 
-    // 3. Search History
     await db.execute('''
       CREATE TABLE search_history (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -125,7 +136,6 @@ class DatabaseService {
       )
     ''');
 
-    // 4. Indexing Jobs tracking
     await db.execute('''
       CREATE TABLE indexing_jobs (
         id TEXT PRIMARY KEY,
@@ -140,7 +150,6 @@ class DatabaseService {
       )
     ''');
 
-    // 5. Processing Queue
     await db.execute('''
       CREATE TABLE processing_queue (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -153,7 +162,6 @@ class DatabaseService {
       )
     ''');
 
-    // 6. Memory Triggers
     await db.execute('''
       CREATE TABLE memory_triggers (
         id TEXT PRIMARY KEY,
@@ -167,7 +175,6 @@ class DatabaseService {
       )
     ''');
     
-    // 7. Timeline Events
     await db.execute('''
       CREATE TABLE timeline_events (
         id TEXT PRIMARY KEY,
@@ -184,7 +191,6 @@ class DatabaseService {
       )
     ''');
 
-    // 8. Timeline Event items
     await db.execute('''
       CREATE TABLE timeline_event_items (
         event_id TEXT,
@@ -194,8 +200,6 @@ class DatabaseService {
     ''');
   }
 
-  // --- CRUD Operations ---
-
   Future<void> upsertMemoryItem(Map<String, dynamic> item) async {
     final db = await database;
     await db.insert('memory_items', item, conflictAlgorithm: ConflictAlgorithm.replace);
@@ -204,7 +208,6 @@ class DatabaseService {
   Future<void> updateFTS(String id, String content, String title, String tags, {String entities = ''}) async {
     final db = await database;
     await db.transaction((txn) async {
-      // Clean up any existing entries for this ID to prevent duplicates in index
       await txn.delete('memory_items_fts', where: 'memory_item_id = ?', whereArgs: [id]);
       await txn.insert('memory_items_fts', {
         'memory_item_id': id,
@@ -214,6 +217,26 @@ class DatabaseService {
         'entities': entities,
       });
     });
+  }
+
+  Future<void> saveEmbedding(String id, List<double> vector, String version) async {
+    final db = await database;
+    final bytes = Float32List.fromList(vector).buffer.asUint8List();
+    await db.insert('memory_embeddings', {
+      'memory_item_id': id,
+      'embedding_blob': bytes,
+      'model_version': version,
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+    
+    await db.update('memory_items', {'is_embedded': 1}, where: 'id = ?', whereArgs: [id]);
+  }
+
+  Future<List<double>?> getEmbedding(String id) async {
+    final db = await database;
+    final results = await db.query('memory_embeddings', where: 'memory_item_id = ?', whereArgs: [id], limit: 1);
+    if (results.isEmpty) return null;
+    final blob = results.first['embedding_blob'] as Uint8List;
+    return Float32List.view(blob.buffer).toList();
   }
 
   Future<void> saveSearch(String query) async {
@@ -240,18 +263,13 @@ class DatabaseService {
     final cleanQuery = query.replaceAll('\'', '\'\'').trim();
     if (cleanQuery.isEmpty) return [];
 
-    // Tokenize query for better multi-word matching
-    // "red car" becomes "red* AND car*" for FTS4
     final tokens = cleanQuery.split(RegExp(r'\s+')).where((t) => t.length >= 2).toList();
     if (tokens.isEmpty && cleanQuery.isNotEmpty) {
-      // Fallback for very short queries
       tokens.add(cleanQuery);
     }
     
     final ftsQuery = tokens.map((t) => '$t*').join(' ');
 
-    // FTS4 match query with snippet support
-    // Using full table name for snippet and MATCH to ensure compatibility across all SQLite versions
     String sql = '''
       SELECT m.*, 
              snippet(memory_items_fts, '[highlight]', '[/highlight]', '...', -1, 15) as matching_snippet
@@ -267,10 +285,18 @@ class DatabaseService {
       args.add(bucket.toUpperCase());
     }
 
-    // Basic ordering: Favorites first, then by recency
     sql += ' ORDER BY m.is_favorite DESC, m.created_at DESC';
 
     return await db.rawQuery(sql, args);
+  }
+
+  Future<List<Map<String, dynamic>>> getSummaryOfEmbeddings() async {
+    final db = await database;
+    return await db.rawQuery('''
+      SELECT m.id, m.title, m.source_bucket, m.created_at, e.embedding_blob 
+      FROM memory_items m
+      JOIN memory_embeddings e ON m.id = e.memory_item_id
+    ''');
   }
 
   Future<List<Map<String, dynamic>>> getRecentMemories({int limit = 10, String? bucket}) async {
@@ -312,9 +338,8 @@ class DatabaseService {
     await db.delete('search_history');
     await db.delete('timeline_events');
     await db.delete('timeline_event_items');
+    await db.delete('memory_embeddings');
   }
-
-  // --- Queue Management ---
 
   Future<void> addToQueue(String itemId, String taskType, int priority) async {
     final db = await database;
@@ -369,8 +394,6 @@ class DatabaseService {
     await db.update('processing_queue', {'status': status}, where: 'id = ?', whereArgs: [id]);
   }
 
-  // --- Memory Triggers Management ---
-
   Future<void> insertTrigger(Map<String, dynamic> data) async {
     final db = await database;
     await db.insert('memory_triggers', data, conflictAlgorithm: ConflictAlgorithm.replace);
@@ -397,8 +420,6 @@ class DatabaseService {
     final db = await database;
     await db.update('memory_triggers', {'is_accepted': 1}, where: 'id = ?', whereArgs: [triggerId]);
   }
-
-  // --- Timeline Management ---
 
   Future<void> insertTimelineEvent(Map<String, dynamic> event, List<String> memoryItemIds) async {
     final db = await database;
@@ -443,15 +464,8 @@ class DatabaseService {
     return results.isNotEmpty;
   }
 
-  // --- Intelligence Engine ---
-
-  /// Finds memories related to the current one based on:
-  /// 1. Close time proximity (+/- 1 hour)
-  /// 2. Shared visual labels (if available)
   Future<List<Map<String, dynamic>>> getRelatedMemories(String memoryId, {int limit = 5}) async {
     final db = await database;
-    
-    // 1. Get current item's data
     final current = await db.query('memory_items', where: 'id = ?', whereArgs: [memoryId], limit: 1);
     if (current.isEmpty) return [];
     
@@ -459,8 +473,6 @@ class DatabaseService {
     final time = item['created_at'] as int;
     final labels = item['labels'] as String? ?? '';
     
-    // 2. Query for items nearby in time OR items with similar labels (FTS)
-    // We prioritize items that are NOT the current one
     final labelList = labels.split(',').where((l) => l.isNotEmpty).take(3);
     String labelQuery = '';
     if (labelList.isNotEmpty) {
@@ -479,8 +491,6 @@ class DatabaseService {
     ''', [memoryId, time - (3600 * 1000), time + (3600 * 1000), limit]);
   }
 
-  /// Analyzes the last 50 items to determine the "Pulse" of the user's life
-  /// Returns a map of category densities (e.g., {'travel': 0.4, 'work': 0.2})
   Future<Map<String, double>> getLifePulse() async {
     final db = await database;
     final recent = await db.query('memory_items', orderBy: 'created_at DESC', limit: 50);

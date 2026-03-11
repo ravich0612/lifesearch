@@ -8,6 +8,7 @@ import 'package:intl/intl.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:open_file/open_file.dart';
 import 'dart:io';
+import '../../../core/utils/file_utils.dart';
 
 class ResultDetailScreen extends ConsumerWidget {
   final String itemId;
@@ -33,14 +34,6 @@ class ResultDetailScreen extends ConsumerWidget {
                    final mime = memory['mime_type'] ?? '';
                    if (!File(path).existsSync()) return Container(color: AppColors.backgroundElevated);
 
-                   if (mime.startsWith('video/')) {
-                     return Container(
-                       color: AppColors.backgroundDark.withValues(alpha: 0.1),
-                       child: const Center(
-                         child: Icon(Icons.play_circle_fill_rounded, size: 80, color: Colors.white),
-                       ),
-                     );
-                   }
 
                    final pathLower = path.toLowerCase();
                    final isWordDoc = mime.contains('word') || mime.contains('officedocument') || pathLower.endsWith('.docx') || pathLower.endsWith('.doc');
@@ -67,6 +60,21 @@ class ResultDetailScreen extends ConsumerWidget {
                        color: AppColors.backgroundDark.withValues(alpha: 0.05),
                        child: Center(
                          child: Icon(icon, color: color, size: 100),
+                       ),
+                     );
+                   }
+                   
+                   if (FileUtils.isVideo(path) || mime.startsWith('video/')) {
+                     return Container(
+                       color: AppColors.backgroundDark.withValues(alpha: 0.1),
+                       child: const Center(
+                         child: Stack(
+                           alignment: Alignment.center,
+                           children: [
+                             Icon(Icons.videocam_rounded, color: AppColors.textTertiary, size: 80),
+                             Icon(Icons.play_circle_fill_rounded, color: Colors.white, size: 64),
+                           ],
+                         ),
                        ),
                      );
                    }

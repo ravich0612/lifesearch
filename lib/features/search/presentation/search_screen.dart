@@ -3,7 +3,11 @@ import 'package:flutter_animate/flutter_animate.dart';
 import 'package:go_router/go_router.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
+import '../../../core/widgets/nebula_background.dart';
+import 'package:url_launcher/url_launcher.dart';
+import 'package:add_2_calendar/add_2_calendar.dart';
 import '../../../core/theme/app_colors.dart';
+import 'package:flutter/services.dart';
 import '../providers/search_providers.dart';
 import 'dart:io';
 
@@ -40,6 +44,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
 
   void _onSearchSubmitted(String query) {
     if (query.isNotEmpty) {
+      HapticFeedback.mediumImpact();
       ref.read(databaseServiceProvider).saveSearch(query);
       final _ = ref.refresh(searchHistoryProvider);
     }
@@ -53,64 +58,69 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
     final activeBucket = ref.watch(activeBucketProvider);
 
     return Scaffold(
-      backgroundColor: AppColors.backgroundLight,
-      body: SafeArea(
-        child: Column(
-          children: [
-            // Search Header
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              child: Row(
-                children: [
-                  IconButton(
-                    onPressed: () => context.pop(),
-                    icon: const Icon(Icons.arrow_back_ios_new_rounded),
-                  ),
-                  Expanded(
-                    child: Hero(
-                      tag: 'search_bar',
-                      child: Material(
-                        color: Colors.transparent,
-                        child: TextField(
-                          controller: _searchController,
-                          focusNode: _focusNode,
-                          onChanged: _onQueryChanged,
-                          onSubmitted: _onSearchSubmitted,
-                          decoration: InputDecoration(
-                            hintText: 'Search memories...',
-                            prefixIcon: const Icon(Icons.search_rounded, color: AppColors.deepIndigo),
-                            suffixIcon: query.isNotEmpty 
-                              ? IconButton(
-                                  icon: const Icon(Icons.close_rounded),
-                                  onPressed: () {
-                                    _searchController.clear();
-                                    _onQueryChanged('');
-                                  },
-                                )
-                              : null,
+      backgroundColor: Colors.white,
+      body: Stack(
+        children: [
+          const Positioned.fill(child: NebulaBackground()),
+          SafeArea(
+            child: Column(
+              children: [
+                // Search Header
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  child: Row(
+                    children: [
+                      IconButton(
+                        onPressed: () => context.pop(),
+                        icon: const Icon(Icons.arrow_back_ios_new_rounded),
+                      ),
+                      Expanded(
+                        child: Hero(
+                          tag: 'search_bar',
+                          child: Material(
+                            color: Colors.transparent,
+                            child: TextField(
+                              controller: _searchController,
+                              focusNode: _focusNode,
+                              onChanged: _onQueryChanged,
+                              onSubmitted: _onSearchSubmitted,
+                              decoration: InputDecoration(
+                                hintText: 'Search memories...',
+                                prefixIcon: const Icon(Icons.search_rounded, color: AppColors.deepIndigo),
+                                suffixIcon: query.isNotEmpty
+                                  ? IconButton(
+                                      icon: const Icon(Icons.close_rounded),
+                                      onPressed: () {
+                                        _searchController.clear();
+                                        _onQueryChanged('');
+                                      },
+                                    )
+                                  : null,
+                              ),
+                            ),
                           ),
                         ),
                       ),
-                    ),
+                    ],
                   ),
-                ],
-              ),
+                ),
+
+                // Source Filters
+                if (query.isNotEmpty)
+                  _SearchFiltersRow(activeBucket: activeBucket),
+
+                const SizedBox(height: 12),
+
+                // Content Area
+                Expanded(
+                  child: query.isEmpty
+                    ? _buildRecentAndSuggestions(historyAsync)
+                    : _buildSearchResults(resultsAsync),
+                ),
+              ],
             ),
-
-            // Source Filters
-            if (query.isNotEmpty) 
-              _SearchFiltersRow(activeBucket: activeBucket),
-
-            const SizedBox(height: 12),
-
-            // Content Area
-            Expanded(
-              child: query.isEmpty
-                ? _buildRecentAndSuggestions(historyAsync)
-                : _buildSearchResults(resultsAsync),
-            ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -132,7 +142,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                   ),
                   const SizedBox(height: 12),
                   ...history.take(5).map((q) => _HistoryTile(
-                    query: q, 
+                    query: q,
                     onTap: () {
                       _searchController.text = q;
                       _onQueryChanged(q);
@@ -190,7 +200,7 @@ class _SearchFiltersRow extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final filters = ['ALL', 'SCREENSHOTS', 'DOCUMENTS', 'RECEIPTS', 'PHOTOS'];
-    
+
     return Container(
       height: 40,
       margin: const EdgeInsets.only(top: 8),
@@ -201,7 +211,7 @@ class _SearchFiltersRow extends ConsumerWidget {
         itemBuilder: (context, index) {
           final filter = filters[index];
           final isSelected = activeBucket == filter;
-          
+
           return Padding(
             padding: const EdgeInsets.only(right: 8),
             child: ChoiceChip(
@@ -283,76 +293,140 @@ class _SearchResultCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final Map<String, dynamic> memory = this.memory;
+    final double semanticScore = memory['semantic_score'] as double? ?? 0.0;
+
     final String path = memory['file_path'] ?? '';
     final String snippet = memory['matching_snippet'] ?? '';
-    final String bucket = memory['source_bucket'] ?? 'MEMORY';
+    final String bucket = (memory['source_bucket'] ?? 'GENERAL').toUpperCase();
     final String mimeType = memory['mime_type'] ?? '';
+
+    // Get category-specific color
+    final categoryColor = AppColors.moodColors[bucket] ?? AppColors.deepIndigo;
 
     return GestureDetector(
       onTap: () => context.push('/detail/${memory['id']}'),
       child: Container(
-        margin: const EdgeInsets.only(bottom: 12),
-        padding: const EdgeInsets.all(12),
+        margin: const EdgeInsets.only(bottom: 16),
         decoration: BoxDecoration(
           color: Colors.white,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: AppColors.cardBorder),
+          borderRadius: BorderRadius.circular(24),
           boxShadow: [
-            BoxShadow(color: Colors.black.withValues(alpha: 0.02), blurRadius: 10, offset: const Offset(0, 4)),
+            BoxShadow(
+              color: categoryColor.withValues(alpha: 0.08),
+              blurRadius: 20,
+              offset: const Offset(0, 8),
+            ),
           ],
+          border: Border.all(color: categoryColor.withValues(alpha: 0.15), width: 1.5),
         ),
+        clipBehavior: Clip.antiAlias,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
               children: [
-                Container(
-                  width: 50,
-                  height: 50,
-                  decoration: BoxDecoration(
-                    color: AppColors.backgroundDark.withValues(alpha: 0.05),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(10),
+                Hero(
+                  tag: 'memory_thumb_${memory['id']}',
+                  child: Container(
+                    width: 90,
+                    height: 90,
+                    decoration: BoxDecoration(
+                      color: categoryColor.withValues(alpha: 0.05),
+                    ),
                     child: _buildPreview(path, mimeType),
                   ),
                 ),
-                const SizedBox(width: 12),
                 Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        memory['title'] ?? 'Untitled',
-                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        '$bucket • ${DateFormat.yMMMd().format(DateTime.fromMillisecondsSinceEpoch(memory['created_at']))}',
-                        style: const TextStyle(color: AppColors.textTertiary, fontSize: 11),
-                      ),
-                    ],
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: categoryColor.withValues(alpha: 0.1),
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: Text(
+                                bucket,
+                                style: TextStyle(
+                                  color: categoryColor,
+                                  fontSize: 9,
+                                  fontWeight: FontWeight.w900,
+                                  letterSpacing: 0.5,
+                                ),
+                              ),
+                            ),
+                            const Spacer(),
+                            Text(
+                              DateFormat.yMMMd().format(DateTime.fromMillisecondsSinceEpoch(memory['created_at'])),
+                              style: const TextStyle(color: AppColors.textTertiary, fontSize: 10),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          memory['title'] ?? 'Untitled Memory',
+                          style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16, height: 1.2),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        if (semanticScore > 0.6)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 4),
+                            child: Row(
+                              children: [
+                                Icon(Icons.auto_awesome, color: categoryColor, size: 10),
+                                const SizedBox(width: 4),
+                                Text(
+                                  'SMART MATCH',
+                                  style: TextStyle(
+                                    color: categoryColor,
+                                    fontSize: 8,
+                                    fontWeight: FontWeight.w800,
+                                    letterSpacing: 0.8,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        const SizedBox(height: 12),
+                        if ((memory['magic_actions'] as List?)?.isNotEmpty ?? false)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 8, bottom: 4),
+                            child: Wrap(
+                              spacing: 8,
+                              children: (memory['magic_actions'] as List).map((action) {
+                                final act = action as Map<String, dynamic>;
+                                return _MagicActionButton(
+                                  label: act['label']!,
+                                  type: act['type']!,
+                                  value: act['value']!,
+                                  color: categoryColor,
+                                );
+                              }).toList(),
+                            ),
+                          ),
+                      ],
+                    ),
                   ),
                 ),
-                if (memory['is_favorite'] == 1)
-                  const Icon(Icons.star_rounded, color: Colors.orange, size: 18),
               ],
             ),
-            if (snippet.isNotEmpty) ...[
-              const SizedBox(height: 10),
+            if (snippet.isNotEmpty)
               Container(
                 width: double.infinity,
-                padding: const EdgeInsets.all(8),
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                 decoration: BoxDecoration(
-                  color: AppColors.backgroundLight,
-                  borderRadius: BorderRadius.circular(8),
+                  color: AppColors.backgroundElevated.withValues(alpha: 0.5),
+                  border: Border(top: BorderSide(color: categoryColor.withValues(alpha: 0.05))),
                 ),
                 child: _RichSnippet(snippet: snippet),
               ),
-            ],
           ],
         ),
       ),
@@ -486,5 +560,83 @@ class _EmptyResultsState extends ConsumerWidget {
         ],
       ),
     );
+  }
+}
+
+class _MagicActionButton extends StatelessWidget {
+  final String label;
+  final String type;
+  final String value;
+  final Color color;
+
+  const _MagicActionButton({
+    required this.label,
+    required this.type,
+    required this.value,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    IconData icon;
+    switch (type) {
+      case 'phone': icon = Icons.phone_forwarded_rounded; break;
+      case 'email': icon = Icons.alternate_email_rounded; break;
+      case 'date': icon = Icons.event_available_rounded; break;
+      default: icon = Icons.bolt_rounded;
+    }
+
+    return GestureDetector(
+      onTap: () {
+        HapticFeedback.lightImpact();
+        _performAction(context);
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.1),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: color.withValues(alpha: 0.2)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 14, color: color),
+            const SizedBox(width: 6),
+            Text(
+              label,
+              style: TextStyle(
+                color: color,
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _performAction(BuildContext context) async {
+    try {
+      if (type == 'phone') {
+        final uri = Uri.parse('tel:$value');
+        if (await canLaunchUrl(uri)) await launchUrl(uri);
+      } else if (type == 'email') {
+        final uri = Uri.parse('mailto:$value');
+        if (await canLaunchUrl(uri)) await launchUrl(uri);
+      } else if (type == 'date') {
+        final event = Event(
+          title: 'LifeSearch Memory Event',
+          description: 'Created from your memories',
+          location: '',
+          startDate: DateTime.now(),
+          endDate: DateTime.now().add(const Duration(hours: 1)),
+        );
+        Add2Calendar.addEvent2Cal(event);
+      }
+    } catch (e) {
+      debugPrint('Action failed: $e');
+    }
   }
 }

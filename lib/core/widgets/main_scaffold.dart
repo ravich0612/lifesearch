@@ -18,7 +18,7 @@ class _MainScaffoldState extends State<MainScaffold> {
     if (location.startsWith('/home')) return 0;
     if (location.startsWith('/timeline')) return 1;
     if (location.startsWith('/collections')) return 2;
-    if (location.startsWith('/settings')) return 3;
+    if (location.startsWith('/reflection')) return 3;
     return 0;
   }
 
@@ -34,7 +34,7 @@ class _MainScaffoldState extends State<MainScaffold> {
         context.go('/collections');
         break;
       case 3:
-        context.go('/settings');
+        context.go('/reflection');
         break;
     }
   }
@@ -77,8 +77,8 @@ class _MainScaffoldState extends State<MainScaffold> {
               onTap: () => _onItemTapped(2, context),
             ),
             _NavBarItem(
-              icon: Icons.settings_outlined,
-              label: 'Settings',
+              icon: Icons.bubble_chart_rounded,
+              label: 'Reflection',
               isSelected: _calculateSelectedIndex(context) == 3,
               onTap: () => _onItemTapped(3, context),
             ),

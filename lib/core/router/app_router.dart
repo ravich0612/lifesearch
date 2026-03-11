@@ -14,6 +14,7 @@ import '../../features/timeline/presentation/timeline_screen.dart';
 import '../../features/timeline/presentation/timeline_event_detail_screen.dart';
 import '../../features/settings/presentation/developer_tools_screen.dart';
 import '../../features/reflection/presentation/reflection_screen.dart';
+import '../../features/settings/presentation/transparency_hub_screen.dart';
 
 final navigationKey = GlobalKey<NavigatorState>();
 
@@ -59,6 +60,10 @@ final router = GoRouter(
         GoRoute(
           path: '/settings',
           builder: (context, state) => const SettingsScreen(),
+        ),
+        GoRoute(
+          path: '/transparency',
+          builder: (context, state) => const TransparencyHubScreen(),
         ),
         GoRoute(
           path: '/search',

@@ -204,6 +204,18 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           ),
           const SizedBox(height: 32),
           _SettingsSection(
+            title: 'Privacy & Trust',
+            children: [
+              _SettingsTile(
+                icon: Icons.shield_rounded, 
+                title: 'Transparency Hub', 
+                subtitle: 'Verify on-device privacy metrics',
+                onTap: () => context.push('/transparency'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 32),
+          _SettingsSection(
             title: 'Index Maintenance',
             children: [
               _SettingsTile(

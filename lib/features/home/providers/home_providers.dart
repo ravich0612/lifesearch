@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/services/database_service.dart';
+import '../../../core/utils/file_utils.dart';
 
 final databaseServiceProvider = Provider((ref) => DatabaseService());
 
@@ -27,6 +28,36 @@ final bucketCountsProvider = FutureProvider<Map<String, int>>((ref) async {
     counts[row['source_bucket'] as String] = row['count'] as int;
   }
   return counts;
+});
+
+final bucketPreviewsProvider = FutureProvider<Map<String, String?>>((ref) async {
+  final dbService = ref.read(databaseServiceProvider);
+  final db = await dbService.database;
+  final buckets = ['SCREENSHOTS', 'DOCUMENTS', 'PHOTOS', 'RECEIPTS', 'GALLERY'];
+  
+  Map<String, String?> previews = {};
+  for (var bucket in buckets) {
+    final results = await db.query(
+      'memory_items',
+      columns: ['file_path', 'mime_type'],
+      where: 'source_bucket = ?',
+      whereArgs: [bucket],
+      orderBy: 'created_at DESC',
+      limit: 50, // Grab a batch to find an image in
+    );
+    
+    String? validImage;
+    for (var row in results) {
+      final path = row['file_path'] as String?;
+      final mime = row['mime_type'] as String?;
+      if (path != null && FileUtils.canBeLoadedAsImage(path, mime)) {
+        validImage = path;
+        break;
+      }
+    }
+    previews[bucket] = validImage;
+  }
+  return previews;
 });
 
 final memoryByIdProvider = FutureProvider.family<Map<String, dynamic>?, String>((ref, id) async {
@@ -66,11 +97,16 @@ final flashbackMemoriesProvider = FutureProvider<List<Map<String, dynamic>>>((re
       'memory_items',
       where: 'created_at BETWEEN ? AND ?',
       whereArgs: [startOfDay, endOfDay],
-      limit: 1,
+      limit: 20,
     );
     
-    if (results.isNotEmpty) {
-      flashbacks.add({...results.first, 'flashback_years': year});
+    for (var row in results) {
+       final path = row['file_path'] as String?;
+       final mime = row['mime_type'] as String?;
+       if (path != null && FileUtils.canBeLoadedAsImage(path, mime)) {
+         flashbacks.add({...row, 'flashback_years': year});
+         break; // Found one for this year
+       }
     }
   }
   return flashbacks;
